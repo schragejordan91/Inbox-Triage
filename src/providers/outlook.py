@@ -1,17 +1,27 @@
-from composio_openai import ComposioToolSet, Action
+from composio_client import Composio
 from src.providers.base import EmailProvider
+from src.config import COMPOSIO_ENTITY_ID
 
 
 class OutlookProvider(EmailProvider):
-    def __init__(self, api_key: str, entity_id: str = "default"):
-        self.toolset = ComposioToolSet(api_key=api_key, entity_id=entity_id)
+    def __init__(self, api_key: str):
+        self.client = Composio(api_key=api_key)
+
+    def _exec(self, slug: str, **args) -> dict:
+        result = self.client.tools.execute(
+            slug,
+            entity_id=COMPOSIO_ENTITY_ID,
+            arguments=args,
+        )
+        return result.model_dump().get("data") or {}
 
     def list_emails(self, max_results: int = 100) -> list[dict]:
-        result = self.toolset.execute_action(
-            action=Action.OUTLOOK_LIST_MESSAGES,
-            params={"top": max_results, "folder": "inbox"},
+        data = self._exec(
+            "OUTLOOK_OUTLOOK_LIST_MESSAGES",
+            folder_id="inbox",
+            top=max_results,
         )
-        messages = (result.get("data") or {}).get("value", [])
+        messages = (data.get("response_data") or {}).get("value") or []
         return [
             {
                 "id": m["id"],
@@ -25,19 +35,23 @@ class OutlookProvider(EmailProvider):
         ]
 
     def archive(self, email_id: str) -> None:
-        self.toolset.execute_action(
-            action=Action.OUTLOOK_MOVE_MESSAGE,
-            params={"message_id": email_id, "destination_folder": "archive"},
+        self._exec(
+            "OUTLOOK_OUTLOOK_MOVE_MESSAGE",
+            message_id=email_id,
+            destination_folder_id="archive",
         )
 
     def delete(self, email_id: str) -> None:
-        self.toolset.execute_action(
-            action=Action.OUTLOOK_DELETE_MESSAGE,
-            params={"message_id": email_id},
+        # Move to Deleted Items folder
+        self._exec(
+            "OUTLOOK_OUTLOOK_MOVE_MESSAGE",
+            message_id=email_id,
+            destination_folder_id="deleteditems",
         )
 
     def add_label(self, email_id: str, label: str) -> None:
-        self.toolset.execute_action(
-            action=Action.OUTLOOK_UPDATE_MESSAGE,
-            params={"message_id": email_id, "categories": [label]},
+        self._exec(
+            "OUTLOOK_OUTLOOK_UPDATE_EMAIL",
+            message_id=email_id,
+            categories=[label],
         )

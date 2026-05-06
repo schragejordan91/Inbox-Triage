@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Callable
 
@@ -44,6 +44,13 @@ def older_than_days(days: int) -> Callable[[dict], bool]:
         if not date_str:
             return False
         try:
+            # ISO 8601 (Composio / Outlook format)
+            date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            return date < cutoff
+        except ValueError:
+            pass
+        try:
+            # RFC 2822 fallback
             from email.utils import parsedate_to_datetime
             date = parsedate_to_datetime(date_str)
             return date < cutoff
@@ -59,25 +66,37 @@ def subject_contains(keyword: str) -> Callable[[dict], bool]:
 
 
 # --- default rules (edit these to match your preferences) ---
+# Gmail system label IDs: CATEGORY_PROMOTIONS, CATEGORY_SOCIAL, SPAM, INBOX, UNREAD
+# Outlook uses categories[] which are user-defined strings
 
 DEFAULT_RULES: list[Rule] = [
     Rule(
-        name="Archive old promotions",
-        conditions=[has_label("Promotions"), older_than_days(7)],
+        name="Archive old Gmail promotions",
+        conditions=[has_label("CATEGORY_PROMOTIONS"), older_than_days(7)],
         action=Action.ARCHIVE,
     ),
     Rule(
-        name="Archive old social notifications",
-        conditions=[has_label("Social"), older_than_days(14)],
+        name="Archive old Gmail updates",
+        conditions=[has_label("CATEGORY_UPDATES"), older_than_days(14)],
         action=Action.ARCHIVE,
     ),
     Rule(
-        name="Delete obvious spam",
-        conditions=[has_label("Spam")],
+        name="Archive old Gmail social",
+        conditions=[has_label("CATEGORY_SOCIAL"), older_than_days(14)],
+        action=Action.ARCHIVE,
+    ),
+    Rule(
+        name="Delete Gmail spam",
+        conditions=[has_label("SPAM")],
         action=Action.DELETE,
     ),
     Rule(
         name="Archive newsletters older than 30 days",
+        conditions=[subject_contains("newsletter"), older_than_days(30)],
+        action=Action.ARCHIVE,
+    ),
+    Rule(
+        name="Archive unsubscribe emails older than 30 days",
         conditions=[subject_contains("unsubscribe"), older_than_days(30)],
         action=Action.ARCHIVE,
     ),

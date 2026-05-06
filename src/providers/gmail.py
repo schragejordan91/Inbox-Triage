@@ -1,51 +1,52 @@
-from composio_openai import ComposioToolSet, Action
+from composio_client import Composio
 from src.providers.base import EmailProvider
+from src.config import COMPOSIO_ENTITY_ID
 
 
 class GmailProvider(EmailProvider):
-    def __init__(self, api_key: str, entity_id: str = "default"):
-        self.toolset = ComposioToolSet(api_key=api_key, entity_id=entity_id)
+    def __init__(self, api_key: str):
+        self.client = Composio(api_key=api_key)
+
+    def _exec(self, slug: str, **args) -> dict:
+        result = self.client.tools.execute(
+            slug,
+            entity_id=COMPOSIO_ENTITY_ID,
+            arguments=args,
+        )
+        return result.model_dump().get("data") or {}
 
     def list_emails(self, max_results: int = 100) -> list[dict]:
-        result = self.toolset.execute_action(
-            action=Action.GMAIL_LIST_THREADS,
-            params={"max_results": max_results, "include_spam_trash": True},
+        data = self._exec(
+            "GMAIL_FETCH_EMAILS",
+            max_results=max_results,
+            include_spam_trash=False,
         )
-        threads = (result.get("data") or {}).get("threads", [])
-        emails = []
-        for t in threads:
-            detail = self.toolset.execute_action(
-                action=Action.GMAIL_GET_THREAD,
-                params={"thread_id": t["id"]},
-            )
-            messages = (detail.get("data") or {}).get("messages", [])
-            if messages:
-                msg = messages[0]
-                headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
-                emails.append({
-                    "id": msg["id"],
-                    "thread_id": t["id"],
-                    "subject": headers.get("Subject", ""),
-                    "from": headers.get("From", ""),
-                    "date": headers.get("Date", ""),
-                    "labels": msg.get("labelIds", []),
-                })
-        return emails
+        messages = data.get("messages") or []
+        return [
+            {
+                "id": m["messageId"],
+                "thread_id": m.get("threadId", ""),
+                "subject": m.get("subject", ""),
+                "from": m.get("sender", ""),
+                "date": m.get("messageTimestamp", ""),
+                "labels": m.get("labelIds", []),
+            }
+            for m in messages
+        ]
 
     def archive(self, email_id: str) -> None:
-        self.toolset.execute_action(
-            action=Action.GMAIL_MODIFY_MESSAGE_LABELS,
-            params={"message_id": email_id, "remove_label_ids": ["INBOX"]},
+        self._exec(
+            "GMAIL_ADD_LABEL_TO_EMAIL",
+            message_id=email_id,
+            remove_label_ids=["INBOX"],
         )
 
     def delete(self, email_id: str) -> None:
-        self.toolset.execute_action(
-            action=Action.GMAIL_TRASH_MESSAGE,
-            params={"message_id": email_id},
-        )
+        self._exec("GMAIL_MOVE_TO_TRASH", message_id=email_id)
 
     def add_label(self, email_id: str, label: str) -> None:
-        self.toolset.execute_action(
-            action=Action.GMAIL_MODIFY_MESSAGE_LABELS,
-            params={"message_id": email_id, "add_label_ids": [label]},
+        self._exec(
+            "GMAIL_ADD_LABEL_TO_EMAIL",
+            message_id=email_id,
+            add_label_ids=[label],
         )
